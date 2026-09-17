@@ -327,6 +327,96 @@
     /* Panels hidden until their tab is selected (JS adds .is-tabbed to body) */
     body.is-tabbed .q-section[hidden] { display: none; }
 
+    /* ── Save & resume ── */
+    .q-resume {
+      display: flex;
+      gap: 14px;
+      align-items: flex-start;
+      background: rgba(176,137,104,.12);
+      border: 1px solid rgba(176,137,104,.45);
+      border-radius: var(--radius-md);
+      padding: 16px 20px;
+      margin-bottom: 24px;
+    }
+
+    .q-resume[hidden] { display: none; }
+
+    .q-resume__icon { font-size: 1.1rem; line-height: 1.4; }
+    .q-resume__body { flex: 1; }
+
+    .q-resume__text {
+      font-size: .9375rem;
+      font-weight: 600;
+      color: var(--brand-dark);
+      margin-bottom: 6px;
+    }
+
+    .q-resume__actions { display: flex; gap: 16px; flex-wrap: wrap; }
+
+    .q-resume__link {
+      background: none;
+      border: none;
+      padding: 0;
+      font-family: 'DM Sans', sans-serif;
+      font-size: .8125rem;
+      font-weight: 600;
+      color: var(--brand-primary);
+      text-decoration: underline;
+      cursor: pointer;
+    }
+
+    .q-resume__link:hover { color: var(--brand-dark); }
+
+    .q-savebar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      background: var(--white);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 14px 18px;
+      margin-bottom: 20px;
+    }
+
+    .q-savebar__status {
+      font-size: .8125rem;
+      color: var(--text-light);
+    }
+
+    .q-savebar__status.is-saved { color: var(--brand-primary); font-weight: 600; }
+    .q-savebar__status.is-warning { color: #A5442F; font-weight: 600; }
+
+    .q-savebar__actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+    .btn-save {
+      background: transparent;
+      border: 1.5px solid var(--border);
+      border-radius: 50px;
+      padding: 8px 16px;
+      font-family: 'DM Sans', sans-serif;
+      font-size: .8125rem;
+      font-weight: 600;
+      color: var(--text-mid);
+      cursor: pointer;
+      transition: all .2s ease;
+    }
+
+    .btn-save:hover {
+      border-color: var(--brand-primary);
+      color: var(--brand-dark);
+      background: var(--brand-light);
+    }
+
+    .btn-save--quiet { color: var(--text-light); }
+
+    .btn-save--quiet:hover {
+      border-color: #A5442F;
+      color: #A5442F;
+      background: rgba(165,68,47,.06);
+    }
+
     /* ── Main layout ── */
     .q-main {
       max-width: 800px;
@@ -915,7 +1005,7 @@
     }
 
     @media print {
-      .q-sticky, .q-nav, .btn-add-row, .btn-submit { display: none; }
+      .q-sticky, .q-nav, .q-savebar, .q-resume, .btn-add-row, .btn-submit { display: none; }
       /* Printing shows every section, whichever tab is open */
       .q-section[hidden], .q-brief[hidden], .q-submit[hidden] { display: block !important; }
       .q-section { break-inside: avoid; box-shadow: none; }
@@ -961,6 +1051,18 @@
 <!-- Main form -->
 <main class="q-main">
 
+  <!-- Resume banner — only shown when a saved draft was found in this browser -->
+  <div class="q-resume" id="resumeBanner" hidden>
+    <div class="q-resume__icon" aria-hidden="true">↩</div>
+    <div class="q-resume__body">
+      <div class="q-resume__text" id="resumeText"></div>
+      <div class="q-resume__actions">
+        <button type="button" class="q-resume__link" id="resumeFresh">Not you? Start fresh</button>
+        <button type="button" class="q-resume__link" id="resumeDismiss">Dismiss</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Briefing -->
   <div class="q-brief" id="qBrief">
     <h2>Before you start</h2>
@@ -988,7 +1090,8 @@
 
     <div class="q-brief__note">
       Rate items 1–5 (1 = not working, 5 = exactly right) and add a comment. <strong>The comments matter more than the numbers.</strong> For anything tied to a specific screen, leave a pinned comment in Figma instead of writing it here.<br /><br />
-      “I don't know” and “I hadn't thought about that” are useful answers. Please don't skip a question to be polite.
+      “I don't know” and “I hadn't thought about that” are useful answers. Please don't skip a question to be polite.<br /><br />
+      Your answers <strong>save automatically in this browser</strong> as you go, so you can stop and come back later. Nothing is sent to anyone until you press <strong>Send feedback</strong>.
     </div>
   </div>
 
@@ -1588,6 +1691,17 @@
       </div>
     </div>
 
+    <!-- Save & resume controls -->
+    <div class="q-savebar" id="saveBar">
+      <div class="q-savebar__status" id="saveStatus" role="status" aria-live="polite"></div>
+      <div class="q-savebar__actions">
+        <button type="button" class="btn-save" id="btnSaveCopy">⬇ Save a copy</button>
+        <button type="button" class="btn-save" id="btnRestore">⬆ Restore</button>
+        <button type="button" class="btn-save btn-save--quiet" id="btnStartOver">Start over</button>
+        <input type="file" id="restoreFile" accept="application/json,.json" hidden />
+      </div>
+    </div>
+
     <!-- Step navigation -->
     <div class="q-nav" id="qNav" hidden>
       <button type="button" class="btn-nav" data-nav="prev">← Back</button>
@@ -1737,13 +1851,21 @@
   document.body.classList.add('is-tabbed');
   nav.hidden = false;
 
+  // Follow a #section-x link pasted into a tab that is already open.
+  window.addEventListener('hashchange', () => {
+    const i = panels.findIndex(p => '#' + p.id === window.location.hash);
+    if (i > -1 && i !== current) showPanel(i);
+  });
+
   // Open the panel named in the URL hash, if any.
   const fromHash = panels.findIndex(p => '#' + p.id === window.location.hash);
   showPanel(fromHash > -1 ? fromHash : 0, { scroll: false });
 
   // ── Copy change log: add rows ────────────────────────────────────────
   const copyLog = document.getElementById('copyLog');
-  document.getElementById('addLogRow').addEventListener('click', () => {
+
+  // Named so that restoring a draft can recreate however many rows were added.
+  function addLogRow() {
     const n   = copyLog.children.length + 1;
     const row = document.createElement('div');
     row.className = 'q-log__row';
@@ -1766,7 +1888,11 @@
         <textarea class="q-input" name="copylog_${n}_why" placeholder="Reason, if it helps"></textarea>
       </div>`;
     copyLog.appendChild(row);
-    row.querySelector('input').focus();
+    return row;
+  }
+
+  document.getElementById('addLogRow').addEventListener('click', () => {
+    addLogRow().querySelector('input').focus();
   });
 
   // ── Q35 ranking: keep each number unique ─────────────────────────────
@@ -1797,6 +1923,265 @@
       reviewerError.hidden = true;
     }
   });
+
+  // -- Save & resume ----------------------------------------------------
+  // Drafts live only in this browser. Nothing leaves the page until the
+  // reviewer presses Send feedback.
+  const DRAFT_KEY     = 'vow-renewal-feedback:v1';
+  const DRAFT_VERSION = 1;
+  // Formspree control fields are rebuilt at submit time, so they aren't saved.
+  const SKIP_FIELDS   = ['_subject', '_replyto', 'form_source', 'prototype_link'];
+
+  const saveStatus   = document.getElementById('saveStatus');
+  const resumeBanner = document.getElementById('resumeBanner');
+  const resumeText   = document.getElementById('resumeText');
+  const restoreInput = document.getElementById('restoreFile');
+
+  let storageWorks = false;
+  let saveTimer    = null;
+  // Once sent, stop saving entirely: the form is hidden but still full of
+  // answers, and pagehide would otherwise write the draft straight back.
+  let submitted    = false;
+
+  // Private windows and blocked site data make localStorage throw on write,
+  // not on read - so probe it properly rather than checking for existence.
+  function storageAvailable() {
+    try {
+      localStorage.setItem('__vr_probe__', '1');
+      localStorage.removeItem('__vr_probe__');
+      return true;
+    } catch (err) {
+      return false;
+    }
+  }
+
+  function isSavable(el) {
+    return el.name &&
+           !SKIP_FIELDS.includes(el.name) &&
+           el.type !== 'submit' &&
+           el.type !== 'button' &&
+           el.type !== 'file';
+  }
+
+  function collectDraft() {
+    const fields = {};
+    Array.from(form.elements).forEach(el => {
+      if (!isSavable(el)) return;
+      if (el.type === 'checkbox') {
+        if (el.checked) (fields[el.name] = fields[el.name] || []).push(el.value);
+      } else if (el.type === 'radio') {
+        if (el.checked) fields[el.name] = el.value;
+      } else if (el.value !== '') {
+        fields[el.name] = el.value;
+      }
+    });
+    return {
+      version:  DRAFT_VERSION,
+      savedAt:  new Date().toISOString(),
+      reviewer: reviewerInput.value.trim(),
+      panel:    current,
+      logRows:  copyLog.children.length,
+      fields:   fields
+    };
+  }
+
+  function applyDraft(draft) {
+    // Recreate the extra copy-change-log rows first, or their fields won't
+    // exist yet to receive values.
+    while (copyLog.children.length < (draft.logRows || 1)) addLogRow();
+
+    Array.from(form.elements).forEach(el => {
+      if (!isSavable(el)) return;
+      const saved = draft.fields[el.name];
+      if (el.type === 'checkbox') {
+        el.checked = Array.isArray(saved) && saved.includes(el.value);
+      } else if (el.type === 'radio') {
+        el.checked = saved === el.value;
+      } else if (saved !== undefined) {
+        el.value = saved;
+      }
+      // Names no longer in the form are skipped, so an older backup still loads.
+    });
+
+    syncRanks();
+    updateProgress();
+    updateTabDots();
+  }
+
+  function resetForm() {
+    form.reset();
+    while (copyLog.children.length > 1) copyLog.lastElementChild.remove();
+    // form.reset() puts the date back to its blank HTML default.
+    dateInput.value = new Date().toISOString().slice(0, 10);
+    reviewerInput.classList.remove('q-input--invalid');
+    reviewerError.hidden = true;
+    syncRanks();
+    updateProgress();
+    updateTabDots();
+  }
+
+  function timeAgo(iso) {
+    const secs = Math.round((Date.now() - new Date(iso)) / 1000);
+    if (secs < 90) return 'just now';
+    const mins = Math.round(secs / 60);
+    if (mins < 60) return mins + (mins === 1 ? ' minute ago' : ' minutes ago');
+    const hrs = Math.round(mins / 60);
+    if (hrs < 24) return hrs + (hrs === 1 ? ' hour ago' : ' hours ago');
+    const days = Math.round(hrs / 24);
+    return days + (days === 1 ? ' day ago' : ' days ago');
+  }
+
+  function setStatus(state, when) {
+    saveStatus.className = 'q-savebar__status';
+    if (state === 'idle') {
+      saveStatus.textContent = 'Your answers save automatically as you type';
+    } else if (state === 'saving') {
+      saveStatus.textContent = 'Saving\u2026';
+    } else if (state === 'saved') {
+      saveStatus.textContent = '\u2713 Saved in this browser \u00b7 ' + (when || 'just now');
+      saveStatus.classList.add('is-saved');
+    } else if (state === 'unavailable') {
+      saveStatus.textContent = '\u26a0 Auto-save isn\u2019t available in this browser window \u2014 use \u201cSave a copy\u201d to keep your answers';
+      saveStatus.classList.add('is-warning');
+    }
+  }
+
+  function saveDraft() {
+    if (!storageWorks || submitted) return;
+    try {
+      localStorage.setItem(DRAFT_KEY, JSON.stringify(collectDraft()));
+      setStatus('saved');
+    } catch (err) {
+      // Quota exceeded or storage revoked mid-session. Stop pretending it works.
+      storageWorks = false;
+      setStatus('unavailable');
+    }
+  }
+
+  function readDraft() {
+    try {
+      const raw = localStorage.getItem(DRAFT_KEY);
+      if (!raw) return null;
+      const draft = JSON.parse(raw);
+      return draft && typeof draft.fields === 'object' && draft.fields ? draft : null;
+    } catch (err) {
+      return null;
+    }
+  }
+
+  function clearDraft() {
+    try { localStorage.removeItem(DRAFT_KEY); } catch (err) { /* nothing to clear */ }
+  }
+
+  function queueSave() {
+    if (!storageWorks || submitted) return;
+    setStatus('saving');
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(saveDraft, 400);
+  }
+
+  function hideResume() { resumeBanner.hidden = true; }
+
+  form.addEventListener('input',  queueSave);
+  form.addEventListener('change', queueSave);
+  // Record the section they were on. These run after the handlers that move it.
+  nav.addEventListener('click',      queueSave);
+  tabStrip.addEventListener('click', queueSave);
+
+  // A closed tab or a sleeping phone shouldn't cost the last few keystrokes.
+  window.addEventListener('pagehide', () => { clearTimeout(saveTimer); saveDraft(); });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') { clearTimeout(saveTimer); saveDraft(); }
+  });
+
+  // -- Backup file ------------------------------------------------------
+  document.getElementById('btnSaveCopy').addEventListener('click', () => {
+    const draft = collectDraft();
+    const who   = (draft.reviewer || 'reviewer').replace(/[^a-z0-9]+/gi, '-').toLowerCase();
+    const blob  = new Blob([JSON.stringify(draft, null, 2)], { type: 'application/json' });
+    const url   = URL.createObjectURL(blob);
+    const a     = document.createElement('a');
+    a.href      = url;
+    a.download  = 'vow-renewal-feedback-' + who + '-' + new Date().toISOString().slice(0, 10) + '.json';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  });
+
+  document.getElementById('btnRestore').addEventListener('click', () => restoreInput.click());
+
+  restoreInput.addEventListener('change', async () => {
+    const file = restoreInput.files[0];
+    if (!file) return;
+
+    let draft = null;
+    try {
+      draft = JSON.parse(await file.text());
+    } catch (err) {
+      draft = null;
+    }
+
+    if (!draft || typeof draft.fields !== 'object' || !draft.fields) {
+      alert('That doesn\u2019t look like a saved copy of this form. Please choose the .json file it downloaded.');
+      restoreInput.value = '';
+      return;
+    }
+
+    if (panels.some(isAnswered) &&
+        !confirm('This will replace the answers currently on the form. Continue?')) {
+      restoreInput.value = '';
+      return;
+    }
+
+    resetForm();
+    applyDraft(draft);
+    showPanel(Math.min(draft.panel || 0, panels.length - 1));
+    saveDraft();
+    hideResume();
+    restoreInput.value = '';
+  });
+
+  // -- Clearing ---------------------------------------------------------
+  document.getElementById('btnStartOver').addEventListener('click', () => {
+    if (!confirm('Clear every answer and start this form again? This cannot be undone.')) return;
+    clearDraft();
+    resetForm();
+    hideResume();
+    showPanel(0);
+    setStatus(storageWorks ? 'idle' : 'unavailable');
+  });
+
+  document.getElementById('resumeDismiss').addEventListener('click', hideResume);
+
+  document.getElementById('resumeFresh').addEventListener('click', () => {
+    if (!confirm('Start a fresh response? The answers saved on this device will be cleared.')) return;
+    clearDraft();
+    resetForm();
+    hideResume();
+    showPanel(0);
+    setStatus(storageWorks ? 'idle' : 'unavailable');
+  });
+
+  // -- Restore on load --------------------------------------------------
+  storageWorks = storageAvailable();
+  setStatus(storageWorks ? 'idle' : 'unavailable');
+
+  if (storageWorks) {
+    const draft = readDraft();
+    if (draft) {
+      applyDraft(draft);
+      resumeText.textContent = draft.reviewer
+        ? 'Picking up where ' + draft.reviewer + ' left off \u2014 saved ' + timeAgo(draft.savedAt) + '.'
+        : 'Your saved answers have been restored \u2014 saved ' + timeAgo(draft.savedAt) + '.';
+      resumeBanner.hidden = false;
+      setStatus('saved', timeAgo(draft.savedAt));
+      // A #section-x link in the URL still wins over the saved section.
+      if (fromHash === -1) {
+        showPanel(Math.min(draft.panel || 0, panels.length - 1), { scroll: false });
+      }
+    }
+  }
 
   // ── Form submit → Formspree ──────────────────────────────────────────
   const errorBox = document.getElementById('formError');
@@ -1833,6 +2218,10 @@
       });
 
       if (res.ok) {
+        // Sent - don't leave this reviewer's answers on a possibly shared device.
+        submitted = true;
+        clearTimeout(saveTimer);
+        clearDraft();
         form.style.display = 'none';
         document.getElementById('thankYouName').textContent = ', ' + who.split(' ')[0];
         document.getElementById('thankYou').style.display = 'block';
