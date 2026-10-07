@@ -1963,6 +1963,18 @@
            el.type !== 'file';
   }
 
+  // Is there anything in this draft beyond the pre-filled date? Fields marked
+  // data-nocount don't count, so an untouched page never saves a draft.
+  function draftHasContent(fields) {
+    return Object.keys(fields || {}).some(name => {
+      const el = form.elements[name];
+      const input = el && el.length ? el[0] : el;
+      if (input && input.hasAttribute && input.hasAttribute('data-nocount')) return false;
+      const v = fields[name];
+      return Array.isArray(v) ? v.length > 0 : String(v || '').trim() !== '';
+    });
+  }
+
   function collectDraft() {
     const fields = {};
     Array.from(form.elements).forEach(el => {
@@ -2048,8 +2060,10 @@
 
   function saveDraft() {
     if (!storageWorks || submitted) return;
+    const draft = collectDraft();
+    if (!draftHasContent(draft.fields)) { clearDraft(); setStatus('idle'); return; }
     try {
-      localStorage.setItem(DRAFT_KEY, JSON.stringify(collectDraft()));
+      localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
       setStatus('saved');
     } catch (err) {
       // Quota exceeded or storage revoked mid-session. Stop pretending it works.
@@ -2063,7 +2077,8 @@
       const raw = localStorage.getItem(DRAFT_KEY);
       if (!raw) return null;
       const draft = JSON.parse(raw);
-      return draft && typeof draft.fields === 'object' && draft.fields ? draft : null;
+      if (!draft || typeof draft.fields !== 'object' || !draft.fields) return null;
+      return draftHasContent(draft.fields) ? draft : null;
     } catch (err) {
       return null;
     }
